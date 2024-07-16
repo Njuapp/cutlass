@@ -435,8 +435,14 @@ public:
   using GmemTiledCopyA = decltype(detail::sm90_cluster_shape_to_tma_atom(shape<1>(ClusterShape_MNK{})));
   using GmemTiledCopyB = decltype(detail::sm90_cluster_shape_to_tma_atom(shape<0>(ClusterShape_MNK{})));
 
+  static_assert(!SwapAB, "SwapAB must be turned off, i.e., TypeA is narrower than TypeB.");
+  static_assert(sizeof_bits<ElementB>::value % sizeof_bits<ElementA>::value == 0, "sizeof_bits<ElementB>::value must be divisible by sizeof_bits<ElementA>::value");
+  static constexpr int type_factor = sizeof_bits<ElementB>::value / sizeof_bits<ElementA>::value;
+  static constexpr int TileShape_M_transformedA = cute::get<0>(TileShape_MNK{}) / type_factor;
+  static constexpr int TileShape_K_transformedA = cute::get<2>(TileShape_MNK{}) * type_factor;
+
   using SmemLayoutAtomA = decltype(detail::rs_smem_selector<GmmaMajorA, ElementA,
-      decltype(cute::get<0>(TileShape_MNK{})), decltype(cute::get<2>(TileShape_MNK{})), IsWarpSpecializedTransposeB>());
+      cute::Int<TileShape_M_transformedA>, cute::Int<TileShape_K_transformedA>, IsWarpSpecializedTransposeB>());
   using SmemLayoutAtomB = decltype(detail::rs_smem_selector<GmmaMajorB, ElementB,
       decltype(cute::get<1>(TileShape_MNK{})), decltype(cute::get<2>(TileShape_MNK{})), IsWarpSpecializedTransposeB>());
 

@@ -214,9 +214,13 @@ public:
   using SmemLayoutAtomScale = Layout<Shape<decltype(cute::shape<0>(InternalSmemLayoutAtomA{})), cute::Int<1>>>;
   using ScaleTileShape = decltype(make_shape(shape<0>(TileShape{}), shape<1>(SmemLayoutAtomScale{})));
 
+  static constexpr int type_factor = sizeof_bits<ElementB>::value / sizeof_bits<ElementA>::value;
+
+  using TileShape_transformedA = decltype(make_shape(cute::Int<get<0>(TileShape{}) / type_factor>{}, shape<1>(TileShape{}), cute::Int<get<2>(TileShape{}) * type_factor>{}));
+
   static_assert(cute::rank(InternalSmemLayoutAtomA{}) == 2, "SmemLayoutAtom must be rank 2 (M/N, K)");
-  static_assert((size<0>(TileShape{}) % size<0>(InternalSmemLayoutAtomA{})) == 0, "SmemLayoutAtom must evenly divide tile shape.");
-  static_assert((size<2>(TileShape{}) % size<1>(InternalSmemLayoutAtomA{})) == 0, "SmemLayoutAtom must evenly divide tile shape.");
+  static_assert((size<0>(TileShape_transformedA{}) % size<0>(InternalSmemLayoutAtomA{})) == 0, "SmemLayoutAtom must evenly divide tile shape.");
+  static_assert((size<2>(TileShape_transformedA{}) % size<1>(InternalSmemLayoutAtomA{})) == 0, "SmemLayoutAtom must evenly divide tile shape.");
 
   static_assert(cute::rank(InternalSmemLayoutAtomB{}) == 2, "SmemLayoutAtom must be rank 2 (M/N, K)");
   static_assert((size<1>(TileShape{}) % size<0>(InternalSmemLayoutAtomB{})) == 0, "SmemLayoutAtom must evenly divide tile shape.");
@@ -229,8 +233,23 @@ public:
   // Tile along modes in a way that maximizes the TMA box size.
   using SmemLayoutA = decltype(tile_to_shape(
       InternalSmemLayoutAtomA{},
-      make_shape(shape<0>(TileShape{}), shape<2>(TileShape{}), Int<DispatchPolicy::Stages>{}),
+      make_shape(shape<0>(TileShape_transformedA{}), shape<2>(TileShape_transformedA{}), Int<DispatchPolicy::Stages>{}),
       cute::conditional_t< ::cutlass::gemm::detail::is_major<0,InternalStrideA>(), Step<_2,_1,_3>, Step<_1,_2,_3>>{}));
+  
+  using SmemLayoutA_mma = 
+              decltype(
+                cute::composition(
+                  SmemLayoutA{}.layout_a(),
+                  SmemLayoutA{}.offset(),
+                  make_layout(
+                    make_shape(shape<0>(TileShape{}), shape<2>(TileShape{}), Int<DispatchPolicy::Stages>{}),
+                    make_stride(get<2>(TileShape{}), _1{}, get<0>(TileShape{}) * get<2>(TileShape{}))
+                 )
+                )
+              );
+            //  cute::conditional_t< ::cutlass::gemm::detail::is_major<0,InternalStrideA>(), 
+            //                       Stride<_1, cute::Int<shape<0>(TileShape{})>, cute::Int<get<0>(TileShape{}) * get<2>(TileShape{})>>, 
+            //                       Stride<cute::Int<shape<2>(TileShape{})>, _1, cute::Int<get<0>(TileShape{}) * get<2>(TileShape{})>>>{})));
   using SmemLayoutB = decltype(tile_to_shape(
       InternalSmemLayoutAtomB{},
       make_shape(shape<1>(TileShape{}), shape<2>(TileShape{}), Int<DispatchPolicy::Stages>{}),
@@ -391,7 +410,7 @@ public:
         GmemTiledCopyA{},
         make_tensor(Outer::get_logical_ptr(static_cast<InternalElementA const*>(nullptr)), repeat_like(InternalStrideA{}, int32_t(0)), InternalStrideA{}),
         SmemLayoutA{}(_,_,cute::Int<0>{}),
-        make_shape(shape<0>(TileShape{}), shape<2>(TileShape{})),
+        make_shape(shape<0>(TileShape_transformedA{}), shape<2>(TileShape_transformedA{})),
         size<1>(ClusterShape{})));  // mcast along N mode for this M load, if any
 
    using TMA_Scale = decltype(make_tma_copy(
@@ -459,13 +478,13 @@ public:
       dB = args.dA;
     }
 
-    Tensor tensor_a = make_tensor(get_logical_ptr(ptr_A), make_layout(make_shape(M,K,L), dA));
+    Tensor tensor_a = make_tensor(get_logical_ptr(ptr_A), make_layout(make_shape(M / type_factor,K * type_factor,L), dA));
     Tensor tensor_b = make_tensor(get_logical_ptr(ptr_B), make_layout(make_shape(N,K,L), dB));
     typename Params::TMA_A tma_load_a = make_tma_copy<TmaElementA>(
         GmemTiledCopyA{},
         tensor_a,
         SmemLayoutA{}(_,_,cute::Int<0>{}),
-        make_shape(shape<0>(TileShape{}), shape<2>(TileShape{})),
+        make_shape(shape<0>(TileShape_transformedA{}), shape<2>(TileShape_transformedA{})),
         size<1>(ClusterShape{})); // mcast along N mode for this M load, if any
 
     typename Params::TMA_B tma_load_b = make_tma_copy(
@@ -524,7 +543,7 @@ public:
     
     bool implementable = true;
     constexpr int min_tma_aligned_elements_A = tma_alignment_bits / cutlass::sizeof_bits<ElementA>::value;
-    implementable = implementable && cutlass::detail::check_alignment<min_tma_aligned_elements_A>(cute::make_shape(M,K,L), StrideA{});
+    implementable = implementable && cutlass::detail::check_alignment<min_tma_aligned_elements_A>(cute::make_shape(M / type_factor,K * type_factor,L), StrideA{});
     constexpr int min_tma_aligned_elements_B = tma_alignment_bits / cutlass::sizeof_bits<ElementB>::value;
     implementable = implementable && cutlass::detail::check_alignment<min_tma_aligned_elements_B>(cute::make_shape(N,K,L), StrideB{});
 
@@ -603,11 +622,11 @@ public:
 
     // TMA requires special handling of strides to deal with coord codomain mapping
     // Represent the full tensors -- get these from TMA
-    Tensor mA_mkl = mainloop_params.tma_load_a.get_tma_tensor(make_shape(M,K,L));                            // (m,k,l)
+    Tensor mA_mkl = mainloop_params.tma_load_a.get_tma_tensor(make_shape(M / type_factor,K * type_factor,L));                            // (m,k,l)
     Tensor mB_nkl = mainloop_params.tma_load_b.get_tma_tensor(make_shape(N,K,L));                            // (n,k,l)
 
     // Make tiled views, defer the slice
-    Tensor gA_mkl = local_tile(mA_mkl, TileShape{}, make_coord(_,_,_), Step<_1, X,_1>{});       // (BLK_M,BLK_K,m,k,l)
+    Tensor gA_mkl = local_tile(mA_mkl, TileShape_transformedA{}, make_coord(_,_,_), Step<_1, X,_1>{});       // (BLK_M,BLK_K,m,k,l)
     Tensor gB_nkl = local_tile(mB_nkl, TileShape{}, make_coord(_,_,_), Step< X,_1,_1>{});       // (BLK_N,BLK_K,n,k,l)
 
     if constexpr (KernelConversionMode == ConversionMode::DirectConvert) {
@@ -807,7 +826,7 @@ public:
       TensorStorage& shared_tensors,
       Params const& mainloop_params) {
     static_assert(is_rmem<FrgTensorC>::value, "C tensor must be rmem resident.");
-    static_assert(cute::rank(SmemLayoutA{}) == 3, "Smem layout must be rank 3.");
+    static_assert(cute::rank(SmemLayoutA_mma{}) == 3, "Smem layout must be rank 3.");
     static_assert(cute::rank(SmemLayoutB{}) == 3, "Smem layout must be rank 3.");
     static_assert(cute::rank(InternalSmemLayoutAtomA{}) == 2, "InternalSmemLayoutAtomA must be rank 2.");
     static_assert(cute::rank(InternalSmemLayoutAtomB{}) == 2, "InternalSmemLayoutAtomB must be rank 2.");
@@ -820,7 +839,7 @@ public:
     int warp_idx = canonical_warp_idx_sync();
     [[maybe_unused]] int warp_group_thread_idx = thread_idx % 128;
     
-    Tensor sA_ = make_tensor(make_smem_ptr(shared_tensors.smem_A.begin()), SmemLayoutA{});        // (BLK_M,BLK_K,PIPE)
+    Tensor sA_ = make_tensor(make_smem_ptr(shared_tensors.smem_A.begin()), SmemLayoutA_mma{});        // (BLK_M,BLK_K,PIPE)
     Tensor sA = as_position_independent_swizzle_tensor(sA_);                                      // (BLK_M,BLK_K,PIPE)
     
     Tensor sB = make_tensor(make_smem_ptr(shared_tensors.smem_B.begin()), SmemLayoutB{});         // (BLK_N,BLK_K,PIPE)
