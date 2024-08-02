@@ -154,8 +154,8 @@ using ElementAccumulator  = float;                                          // E
 using ElementCompute      = float;                                          // Element type for epilogue computation
 using ArchTag             = cutlass::arch::Sm90;                            // Tag indicating the minimum SM that supports the intended feature
 using OperatorClass       = cutlass::arch::OpClassTensorOp;                 // Operator class tag
-using TileShape           = Shape<_128,_256,cute::Int<TileShapeK>>;         // Threadblock-level tile size
-using ClusterShape        = Shape<_2,_1,_1>;                                // Shape of the threadblocks in a cluster
+using TileShape           = Shape<_128,_16,cute::Int<TileShapeK>>;         // Threadblock-level tile size
+using ClusterShape        = Shape<_1,_1,_1>;                                // Shape of the threadblocks in a cluster
 using KernelSchedule      = cutlass::gemm::KernelTmaWarpSpecializedCooperativeMixedInput;  // Kernel to launch based on the default setting in the Collective Builder 
 using EpilogueSchedule    = cutlass::epilogue::TmaWarpSpecializedCooperative;
 using EpilogueTileType    = cutlass::epilogue::collective::EpilogueTileAuto;
@@ -382,12 +382,12 @@ bool initialize_tensor(
     scope_min = 0;
   }
   else if (bits_input <= 8) {
-    scope_max = 2;
-    scope_min = -2;
+    scope_max = 1;
+    scope_min = 1;
   }
   else if (bits_output == 16) {
-    scope_max = 5;
-    scope_min = -5;
+    scope_max = 1;
+    scope_min = 1;
   }
   else {
     scope_max = 8;
@@ -599,6 +599,32 @@ bool verify(const Options &options) {
   const ElementD epsilon(1e-2f);
   const ElementD non_zero_floor(1e-4f);
   bool passed = cutlass::reference::host::TensorRelativelyEquals(tensor_ref_D.host_view(), tensor_D.host_view(), epsilon, non_zero_floor);
+  // auto tensor_B_dq_host = tensor_B_dq.host_data();
+  // for(int i = 0; i < 16; i ++){
+  //   printf("The line %d of tensor_B_dq:\n", i+64);
+  //   for(int j = 0; j < options.k; j ++){
+  //     print(tensor_B_dq_host[(i+64) * options.k + j]);
+  //     print(" ");
+  //   }
+  //   print("\n");
+  // }
+
+  // for(int i = 0; i < options.m; i ++){
+  //   auto tensor_D_host_ = tensor_D.host_data();
+  //   auto tensor_ref_D_host_ = tensor_ref_D.host_data();
+  //   printf("The line %d:\n", i);
+
+  //   for(int j = 0; j < options.n; j ++){
+  //     print(tensor_D_host_[i * options.n + j]);
+  //     print(" ");
+  //   }
+  //   printf("\n");
+  //   for(int j = 0; j < options.n; j ++){
+  //     print(tensor_ref_D_host_[i * options.n + j]);
+  //     print(" ");
+  //   }
+  //   printf("\n");
+  // }
   return passed;
 }
 
