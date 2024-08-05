@@ -1103,7 +1103,7 @@ public:
       --k_tile_count;
       if (k_tile_count > 0) {
         // Wait for K_BLOCK_MAX - 1 to be in flight to ensure that it is safe to overwrite the A registers for the first mma.
-        warpgroup_wait<K_BLOCK_MAX - 1>(); 
+        warpgroup_wait<K_BLOCK_MAX - kNumKIterationsPerWarpBLoad>(); 
         pipeline.consumer_wait(smem_pipe_read, barrier_token);
         copy_A_and_extra_info(smem_tiled_copy_A, tCsA_remapped, tCrA_copy_view, 
           partitioned_extra_info, copy_partitions_extra_info, 0, smem_pipe_read.index(), kNumKIterationsPerWarpBLoad);
@@ -1138,8 +1138,8 @@ public:
         tiled_mma.accumulate_ = GMMA::ScaleOut::One;
         warpgroup_commit_batch();
 
-        warpgroup_wait<K_BLOCK_MAX - 1>();
-        if (k_block == K_BLOCK_MAX - 1) {
+        warpgroup_wait<K_BLOCK_MAX - kNumKIterationsPerWarpBLoad>();
+        if (k_block == K_BLOCK_MAX - kNumKIterationsPerWarpBLoad) {
           // We have K_BLOCK_MAX - 1 GMMA instructions pending for this stage, so we can release prior barrier
           pipeline.consumer_release(smem_pipe_release);             // UNLOCK smem_pipe_release, done _computing_ on it
           ++smem_pipe_release;
@@ -1150,17 +1150,17 @@ public:
         }
 
         //TODO: switch between -1 and -2 according to w4a16 (-2) or not
-        if (k_block == K_BLOCK_MAX - kNumKIterationsPerWarpBLoad) { 
+        if (k_block < K_BLOCK_MAX - 1){
+          copy_A_and_extra_info(smem_tiled_copy_A, tCsA_remapped, tCrA_copy_view, 
+            partitioned_extra_info, copy_partitions_extra_info, k_block + 1, read_stage, kNumKIterationsPerWarpBLoad);
+          transform_A_kblock(tCrA_load, A_CPY_VEC_remapped{}, tCrA_mma, partitioned_extra_info, k_block + 1, kNumKIterationsPerWarpBLoad);
+        }
+        else { 
           pipeline.consumer_wait(smem_pipe_read, barrier_token);
           copy_A_and_extra_info(smem_tiled_copy_A, tCsA_remapped, tCrA_copy_view, 
             partitioned_extra_info, copy_partitions_extra_info, 0, smem_pipe_read.index(), kNumKIterationsPerWarpBLoad);
           transform_A_kblock(tCrA_load, A_CPY_VEC_remapped{}, tCrA_mma, partitioned_extra_info, 0, kNumKIterationsPerWarpBLoad);
         } 
-        else {
-          copy_A_and_extra_info(smem_tiled_copy_A, tCsA_remapped, tCrA_copy_view, 
-            partitioned_extra_info, copy_partitions_extra_info, k_block + 1, read_stage, kNumKIterationsPerWarpBLoad);
-          transform_A_kblock(tCrA_load, A_CPY_VEC_remapped{}, tCrA_mma, partitioned_extra_info, k_block + 1, kNumKIterationsPerWarpBLoad);
-        }
       }
       warpgroup_fence_operand(accum);
 
@@ -1186,8 +1186,8 @@ public:
         cute::gemm(tiled_mma, tCrA_mma_inverse_mapping(_,_,k_block), tCrB(_,_,k_block,read_stage), accum);
         tiled_mma.accumulate_ = GMMA::ScaleOut::One;
         warpgroup_commit_batch();
-        warpgroup_wait<K_BLOCK_MAX - 1>();
-        if (k_block == K_BLOCK_MAX - 1) {
+        warpgroup_wait<K_BLOCK_MAX - kNumKIterationsPerWarpBLoad>();
+        if (k_block == K_BLOCK_MAX - kNumKIterationsPerWarpBLoad) {
           // release prior barrier
           pipeline.consumer_release(smem_pipe_release);             // UNLOCK smem_pipe_release, done _computing_ on it
           ++smem_pipe_release;
