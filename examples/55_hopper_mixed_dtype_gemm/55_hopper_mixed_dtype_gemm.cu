@@ -159,6 +159,8 @@ using ClusterShape        = Shape<_2,_1,_1>;                                // S
 using KernelSchedule      = cutlass::gemm::KernelTmaWarpSpecializedCooperativeMixedInput;  // Kernel to launch based on the default setting in the Collective Builder 
 using EpilogueSchedule    = cutlass::epilogue::TmaWarpSpecializedCooperative;
 using EpilogueTileType    = cutlass::epilogue::collective::EpilogueTileAuto;
+using TileScheduler = cute::conditional_t<size<0>(TileShape{}) == Int<64>{},
+            cutlass::gemm::PersistentScheduler, cutlass::gemm::StreamKScheduler>;
 
 using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
     cutlass::arch::Sm90, cutlass::arch::OpClassTensorOp,
@@ -191,7 +193,8 @@ using CollectiveMainloopConvertOnly = typename cutlass::gemm::collective::Collec
 using GemmKernelConvertOnly = cutlass::gemm::kernel::GemmUniversal<
     Shape<int,int,int,int>, // Indicates ProblemShape
     CollectiveMainloopConvertOnly,
-    CollectiveEpilogue
+    CollectiveEpilogue,
+    TileScheduler
 >;
 
 using GemmConvertOnly = cutlass::gemm::device::GemmUniversalAdapter<GemmKernelConvertOnly>;
@@ -213,7 +216,8 @@ using CollectiveMainloopScaleOnly = typename cutlass::gemm::collective::Collecti
 using GemmKernelScaleOnly = cutlass::gemm::kernel::GemmUniversal<
     Shape<int,int,int,int>, // Indicates ProblemShape
     CollectiveMainloopScaleOnly,
-    CollectiveEpilogue
+    CollectiveEpilogue,
+    TileScheduler
 >;
 
 using GemmScaleOnly = cutlass::gemm::device::GemmUniversalAdapter<GemmKernelScaleOnly>;
@@ -235,7 +239,8 @@ using CollectiveMainloopScaleWithZeroPoint = typename cutlass::gemm::collective:
 using GemmKernelScaleWithZeroPoint = cutlass::gemm::kernel::GemmUniversal<
     Shape<int,int,int,int>, // Indicates ProblemShape
     CollectiveMainloopScaleWithZeroPoint,
-    CollectiveEpilogue
+    CollectiveEpilogue,
+    TileScheduler
 >;
 
 using GemmScaleWithZeroPoint = cutlass::gemm::device::GemmUniversalAdapter<GemmKernelScaleWithZeroPoint>;
