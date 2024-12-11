@@ -117,7 +117,7 @@ enum GemmMode {
 /////////////////////////////////////////////////////////////////////////////////////////////////
 /// GEMM kernel configurations
 /////////////////////////////////////////////////////////////////////////////////////////////////
-using MmaType = cutlass::float_e4m3_t;
+using MmaType = cutlass::bfloat16_t;
 using QuantType = cutlass::int4b_t;
 constexpr int TileShapeK = 128 * 8 / sizeof_bits<MmaType>::value;
 
@@ -135,12 +135,12 @@ constexpr int AlignmentB  = 128 / cutlass::sizeof_bits<ElementB>::value;    // M
 using LayoutA_Transpose = typename cutlass::layout::LayoutTranspose<LayoutA>::type;
 using LayoutB_Transpose = typename cutlass::layout::LayoutTranspose<LayoutB>::type;
 
-using ElementZero = cutlass::half_t;
-using ElementScale = cutlass::half_t;
+using ElementZero = cutlass::bfloat16_t;
+using ElementScale = cutlass::bfloat16_t;
 using LayoutScale = cutlass::layout::RowMajor;
 
 // C/D matrix configuration
-using         ElementC    = cutlass::half_t;                                // Element type for C and D matrix operands
+using         ElementC    = cutlass::bfloat16_t;                                // Element type for C and D matrix operands
 using         LayoutC     = cutlass::layout::RowMajor;                      // Layout type for C and D matrix operands
 constexpr int AlignmentC  = 128 / cutlass::sizeof_bits<ElementC>::value;    // Memory access granularity/alignment of C matrix in units of elements (up to 16 bytes)
 
